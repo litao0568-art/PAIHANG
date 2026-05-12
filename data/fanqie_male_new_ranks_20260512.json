@@ -1,19 +1,8 @@
 {
   "date": "2026-05-12",
-  "prev_date": "",
   "categories": [
     {
       "name": "西方奇幻",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "巫师：让你学知识，你杀穿万界？",
@@ -179,16 +168,6 @@
     },
     {
       "name": "东方仙侠",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "我都准圣了，同学们怎么才先天？",
@@ -354,16 +333,6 @@
     },
     {
       "name": "科幻末世",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "开局穿越土卫六，人类就在我隔壁",
@@ -529,16 +498,6 @@
     },
     {
       "name": "都市日常",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "拿我照片网恋，真当你是主角啊？",
@@ -704,16 +663,6 @@
     },
     {
       "name": "都市修真",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "骗子道士，没想到你是真会啊！",
@@ -879,16 +828,6 @@
     },
     {
       "name": "都市高武",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "自首后，国家发现我活了两千年",
@@ -1054,16 +993,6 @@
     },
     {
       "name": "历史古代",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "开局劝反蓝玉，老朱疯了",
@@ -1229,16 +1158,6 @@
     },
     {
       "name": "战神赘婿",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "特种兵：说好废柴，这杀神是谁？",
@@ -1404,16 +1323,6 @@
     },
     {
       "name": "都市种田",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "狩猎70：猎财猎色猎人生",
@@ -1579,16 +1488,6 @@
     },
     {
       "name": "传统玄幻",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "我魔道元婴老祖，开局抢夺金手指",
@@ -1754,16 +1653,6 @@
     },
     {
       "name": "历史脑洞",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "大唐：我穿越后每天获得一项能力",
@@ -1929,16 +1818,6 @@
     },
     {
       "name": "悬疑脑洞",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "让你诡异求生，你摇来元始天尊？",
@@ -2104,16 +1983,6 @@
     },
     {
       "name": "都市脑洞",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "长生四十六亿年，被妹妹首播曝光",
@@ -2279,16 +2148,6 @@
     },
     {
       "name": "玄幻脑洞",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "开局退婚，我觉醒百倍天赋词条！",
@@ -2454,16 +2313,6 @@
     },
     {
       "name": "悬疑灵异",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "九叔以为捡个小萌僵，结果是猛僵",
@@ -2629,16 +2478,6 @@
     },
     {
       "name": "抗战谍战",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "我无限物品，爽玩诸天",
@@ -2804,16 +2643,6 @@
     },
     {
       "name": "游戏体育",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "三角洲：开局被哈吉瑶捡回棠舟",
@@ -2979,16 +2808,6 @@
     },
     {
       "name": "动漫衍生",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "咒回：特级的我去死灭打宿傩了！",
@@ -3154,16 +2973,6 @@
     },
     {
       "name": "男频衍生",
-      "trend": {
-        "new_count": 0,
-        "dropped_count": 0,
-        "new_books": [],
-        "dropped_books": [],
-        "top_risers": [],
-        "top_fallers": [],
-        "reads_growth": [],
-        "summary": "首日数据，暂无趋势对比。"
-      },
       "books": [
         {
           "title": "少歌：融合李白，开局醉闯雪月城",
