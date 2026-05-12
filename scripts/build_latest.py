@@ -1,0 +1,669 @@
+"""
+构建 latest_ranks.json：
+1. 加载最近两天的 JSON 快照
+2. 按分类对比趋势（新上榜/掉榜/排名变化/阅读量变化）
+3. 可选调用 Gemini Flash 生成 AI 总结
+4. 输出 latest_ranks.json + trends/YYYY-MM-DD.json
+"""
+import os
+import re
+import json
+import glob
+import sys
+import argparse
+
+
+def parse_reads(reads_str: str) -> float:
+    """将 '15.2万' 这样的字符串转为数值，用于比较。"""
+    if not reads_str or reads_str == "未知":
+        return 0
+    s = reads_str.strip().replace(",", "")
+    try:
+        if "万" in s:
+            return float(s.replace("万", "")) * 10000
+        return float(s)
+    except ValueError:
+        return 0
+
+
+def format_reads_change(diff: float) -> str:
+    """格式化阅读量变化。"""
+    if abs(diff) >= 10000:
+        return f"{'+' if diff > 0 else ''}{diff / 10000:.1f}万"
+    return f"{'+' if diff > 0 else ''}{int(diff)}"
+
+
+def load_snapshot(path: str) -> dict:
+    """加载一个 JSON 快照文件。"""
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def compare_categories(today_cats: list, prev_cats: list) -> dict:
+    """
+    对比两天的分类数据，返回每个分类的趋势信息。
+    key = 分类名, value = trend dict
+    """
+    # 构建 prev 的索引: cat_name -> {url: (rank, reads_str, title)}
+    prev_index = {}
+    for cat in prev_cats:
+        url_map = {}
+        for i, book in enumerate(cat.get("books", [])):
+            url_map[book["url"]] = {
+                "rank": i + 1,
+                "reads": book.get("reads", "未知"),
+                "title": book.get("title", "未知"),
+                "intro": book.get("intro", "暂无简介"),
+            }
+        prev_index[cat["name"]] = url_map
+
+    trends = {}
+    for cat in today_cats:
+        cat_name = cat["name"]
+        prev_urls = prev_index.get(cat_name, {})
+        today_books = cat.get("books", [])
+
+        new_books = []
+        dropped_books = []
+        risers = []
+        fallers = []
+        reads_growth = []
+
+        today_urls = set()
+        for i, book in enumerate(today_books):
+            url = book["url"]
+            today_urls.add(url)
+            today_rank = i + 1
+            title = book.get("title", "未知")
+
+            if url in prev_urls:
+                prev_info = prev_urls[url]
+                prev_rank = prev_info["rank"]
+                rank_change = prev_rank - today_rank  # 正数=上升
+
+                if rank_change > 0:
+                    risers.append({"title": title, "change": f"+{rank_change}"})
+                elif rank_change < 0:
+                    fallers.append({"title": title, "change": str(rank_change)})
+
+                # 阅读量变化
+                today_reads = parse_reads(book.get("reads", ""))
+                prev_reads = parse_reads(prev_info["reads"])
+                if today_reads > 0 and prev_reads > 0:
+                    diff = today_reads - prev_reads
+                    if diff != 0:
+                        reads_growth.append(
+                            {"title": title, "growth": format_reads_change(diff)}
+                        )
+            else:
+                new_books.append(title)
+
+        # 掉出榜单的书（含简介以便 AI 分析题材）
+        for url, info in prev_urls.items():
+            if url not in today_urls:
+                dropped_books.append({
+                    "title": info["title"],
+                    "intro": info.get("intro", "暂无简介")[:100],
+                })
+
+        # 排序：涨幅最大的在前
+        risers.sort(key=lambda x: int(x["change"].replace("+", "")), reverse=True)
+        fallers.sort(key=lambda x: int(x["change"]))
+        reads_growth.sort(
+            key=lambda x: parse_reads(x["growth"].replace("+", "")), reverse=True
+        )
+
+        trends[cat_name] = {
+            "new_count": len(new_books),
+            "dropped_count": len(dropped_books),
+            "new_books": new_books[:5],
+            "dropped_books": dropped_books[:5],
+            "top_risers": risers[:3],
+            "top_fallers": fallers[:3],
+            "reads_growth": reads_growth[:3],
+            "summary": "",  # AI 总结，由 generate_ai_summaries 填充
+        }
+
+    return trends
+
+
+def generate_trend_summary_text(cat_name: str, trend: dict) -> str:
+    """生成基于规则的简短趋势文本（作为 AI 总结不可用时的 fallback）。"""
+    parts = []
+    if trend["new_count"] > 0:
+        parts.append(f"新增{trend['new_count']}本上榜")
+    if trend["dropped_count"] > 0:
+        dropped_titles = [d["title"] if isinstance(d, dict) else d
+                          for d in trend.get("dropped_books", [])]
+        if dropped_titles:
+            parts.append(f"{trend['dropped_count']}本掉出（{'、'.join('《' + t + '》' for t in dropped_titles)}）")
+        else:
+            parts.append(f"{trend['dropped_count']}本掉出")
+    if trend["top_risers"]:
+        r = trend["top_risers"][0]
+        parts.append(f"《{r['title']}》排名上升{r['change']}位")
+    if trend["reads_growth"]:
+        g = trend["reads_growth"][0]
+        parts.append(f"《{g['title']}》阅读量{g['growth']}")
+    if not parts:
+        parts.append("榜单无明显变动")
+    return "；".join(parts) + "。"
+
+
+def build_ai_prompt(cat_name: str, cat: dict, trend: dict) -> str:
+    """构建 AI 总结的 prompt（统一模板）。"""
+    # 当前榜单书籍
+    intros = []
+    for i, book in enumerate(cat.get("books", [])[:20]):
+        intros.append(
+            f"{i+1}. 《{book['title']}》- {book.get('author', '未知')}\n"
+            f"   在读：{book.get('reads', '未知')}\n"
+            f"   简介：{book.get('intro', '无')[:200]}"
+        )
+    intros_text = "\n".join(intros)
+
+    # 新上榜书籍
+    new_books = trend.get("new_books", [])
+    new_text = "、".join(f"《{t}》" for t in new_books) if new_books else "无"
+
+    # 掉出榜单书籍（含简介）
+    dropped = trend.get("dropped_books", [])
+    if dropped:
+        dropped_lines = []
+        for d in dropped:
+            if isinstance(d, dict):
+                dropped_lines.append(f"《{d['title']}》（{d.get('intro', '暂无简介')[:50]}）")
+            else:
+                dropped_lines.append(f"《{d}》")
+        dropped_text = "、".join(dropped_lines)
+    else:
+        dropped_text = "无"
+
+    # 排名变动
+    risers = trend.get("top_risers", [])
+    risers_text = "、".join(f"《{r['title']}》{r['change']}" for r in risers) if risers else "无"
+    fallers = trend.get("top_fallers", [])
+    fallers_text = "、".join(f"《{f['title']}》{f['change']}" for f in fallers) if fallers else "无"
+
+    return f"""你是一位网文行业分析师。请根据以下数据，为番茄小说「{cat_name}」分类新书榜生成结构化分析。
+
+## 当前榜单 Top 20
+{intros_text}
+
+## 榜单变动
+- 新上榜：{new_text}
+- 掉出榜单：{dropped_text}
+- 排名上升：{risers_text}
+- 排名下降：{fallers_text}
+
+## 输出要求（请严格按以下格式输出，使用 Markdown）
+
+**🔥 题材趋势**
+用1-2句话总结当前分类的主流题材和高频元素（如穿书/重生/系统/种田等），点明哪些设定扎堆出现。
+
+**📖 读者偏好**
+用1句话概括读者口味方向（甜宠/虐/爽/日常/暗黑等），以及金手指类型偏好。
+
+**🆕 新上榜作品**
+列出新上榜书名，每本用一句话点评其题材亮点或差异化卖点。
+
+**📉 掉出榜单**
+列出掉出书名及其题材方向，简要分析可能掉出的原因（如题材饱和、同质化等）。
+
+**💡 值得关注**
+挑1-2本有差异化潜力的作品，说明理由。
+
+要求：每个板块2-3句话，总字数250字以内。语言简洁专业，像行业快报。"""
+
+
+BATCH_SIZE = 3  # 每批合并的分类数
+
+
+def build_batch_ai_prompt(batch: list) -> str:
+    """构建批量 AI 总结的 prompt。
+
+    batch: list of (cat_name, cat_data, trend_data) tuples
+    """
+    sections = []
+    for cat_name, cat, trend in batch:
+        intros = []
+        for i, book in enumerate(cat.get("books", [])[:20]):
+            intros.append(
+                f"{i+1}. 《{book['title']}》- {book.get('author', '未知')}\n"
+                f"   在读：{book.get('reads', '未知')}\n"
+                f"   简介：{book.get('intro', '无')[:200]}"
+            )
+        intros_text = "\n".join(intros)
+
+        new_books = trend.get("new_books", [])
+        new_text = "、".join(f"《{t}》" for t in new_books) if new_books else "无"
+
+        dropped = trend.get("dropped_books", [])
+        if dropped:
+            dropped_lines = []
+            for d in dropped:
+                if isinstance(d, dict):
+                    dropped_lines.append(
+                        f"《{d['title']}》（{d.get('intro', '暂无简介')[:50]}）"
+                    )
+                else:
+                    dropped_lines.append(f"《{d}》")
+            dropped_text = "、".join(dropped_lines)
+        else:
+            dropped_text = "无"
+
+        risers = trend.get("top_risers", [])
+        risers_text = (
+            "、".join(f"《{r['title']}》{r['change']}" for r in risers)
+            if risers else "无"
+        )
+        fallers = trend.get("top_fallers", [])
+        fallers_text = (
+            "、".join(f"《{f['title']}》{f['change']}" for f in fallers)
+            if fallers else "无"
+        )
+
+        sections.append(
+            f"### 分类：{cat_name}\n\n"
+            f"**当前榜单 Top 20：**\n{intros_text}\n\n"
+            f"**榜单变动：**\n"
+            f"- 新上榜：{new_text}\n"
+            f"- 掉出榜单：{dropped_text}\n"
+            f"- 排名上升：{risers_text}\n"
+            f"- 排名下降：{fallers_text}"
+        )
+
+    all_sections = "\n\n---\n\n".join(sections)
+    cat_names = [b[0] for b in batch]
+
+    output_examples = "\n\n".join(
+        f"===BEGIN: {name}===\n"
+        f"**🔥 题材趋势** ...\n"
+        f"**📖 读者偏好** ...\n"
+        f"**🆕 新上榜作品** ...\n"
+        f"**📉 掉出榜单** ...\n"
+        f"**💡 值得关注** ...\n"
+        f"===END: {name}==="
+        for name in cat_names
+    )
+
+    return (
+        f"你是一位网文行业分析师。请根据以下数据，"
+        f"为番茄小说的多个分类新书榜分别生成结构化分析。\n\n"
+        f"{all_sections}\n\n"
+        f"## 输出要求\n\n"
+        f"请严格按照以下格式，为每个分类分别输出分析。"
+        f"每个分类的分析必须包裹在对应的标记中：\n\n"
+        f"{output_examples}\n\n"
+        f"每个板块2-3句话，每个分类总字数250字以内。"
+        f"语言简洁专业，像行业快报。\n"
+        f"注意：必须为每个分类都输出完整分析，不可省略任何分类。"
+    )
+
+
+def parse_batch_response(response_text: str, cat_names: list) -> dict:
+    """解析批量 AI 响应，返回 {cat_name: summary} 字典。"""
+    results = {}
+    for name in cat_names:
+        pattern = rf"===BEGIN:\s*{re.escape(name)}\s*===(.*?)===END:\s*{re.escape(name)}\s*==="
+        match = re.search(pattern, response_text, re.DOTALL)
+        if match:
+            summary = match.group(1).strip()
+            if summary:
+                results[name] = summary
+    return results
+
+
+def _save_trends_incremental(trend_path: str, date: str,
+                             prev_date: str, trends: dict):
+    """增量保存趋势数据到文件（每批成功后立即写入）。"""
+    if not trend_path:
+        return
+    trend_output = {
+        "date": date,
+        "prev_date": prev_date,
+        "trends": trends,
+    }
+    with open(trend_path, "w", encoding="utf-8") as f:
+        json.dump(trend_output, f, ensure_ascii=False, indent=2)
+
+
+
+def is_rule_summary(summary: str) -> bool:
+    """判断一个总结是否为规则模板生成的（非 AI）。
+    规则摘要特征：短小、分号分隔、以句号结尾、无换行。
+    """
+    if not summary:
+        return True
+    if summary == "首日数据，暂无趋势对比。":
+        return True
+    # 规则摘要一般 < 150 字，用分号分隔，无换行
+    if len(summary) < 150 and "；" in summary and "\n" not in summary:
+        return True
+    return False
+
+
+def generate_ai_summaries(categories: list, trends: dict,
+                          api_key: str, base_url: str,
+                          model: str, force: bool = False,
+                          existing_trends: dict = None,
+                          trend_path: str = None,
+                          trend_date: str = "",
+                          prev_date: str = "") -> dict:
+    """通过 OpenAI 兼容 API 为每个分类生成 AI 总结。
+
+    采用批量合并策略（每 BATCH_SIZE 个分类一次调用）减少 API 调用次数，
+    并在每批成功后增量保存，避免中途失败丢失已完成的结果。
+    批量失败的分类会自动降级为逐个重试。
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print("⚠️  openai 库未安装，跳过 AI 总结。pip install openai")
+        return trends
+
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=120.0)
+    existing_trends = existing_trends or {}
+
+    # 1. 筛选需要生成总结的分类
+    pending = []  # (cat_name, cat_data, trend_data)
+    skipped = 0
+
+    for cat in categories:
+        cat_name = cat["name"]
+        if cat_name not in trends:
+            continue
+
+        if not force:
+            existing_summary = existing_trends.get(cat_name, {}).get("summary", "")
+            if existing_summary and not is_rule_summary(existing_summary):
+                trends[cat_name]["summary"] = existing_summary
+                skipped += 1
+                continue
+
+        pending.append((cat_name, cat, trends[cat_name]))
+
+    if skipped > 0:
+        print(f"  ⏭️  跳过 {skipped} 个已有 AI 总结的分类")
+
+    if not pending:
+        print("  ✅ 所有分类已有 AI 总结，无需生成")
+        return trends
+
+    # 2. 分批处理
+    batches = [
+        pending[i:i + BATCH_SIZE]
+        for i in range(0, len(pending), BATCH_SIZE)
+    ]
+    failed_cats = []  # 批量失败后需单独重试的分类
+
+    print(f"  📦 共 {len(pending)} 个分类，分 {len(batches)} 批处理"
+          f"（每批最多 {BATCH_SIZE} 个）")
+
+    for batch_idx, batch in enumerate(batches):
+        batch_names = [b[0] for b in batch]
+        print(f"\n  📦 第 {batch_idx + 1}/{len(batches)} 批: "
+              f"{', '.join(batch_names)}")
+
+        prompt = build_batch_ai_prompt(batch)
+
+        max_retries = 3
+        batch_success = False
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=500 * len(batch),
+                    temperature=0.7,
+                )
+                content = response.choices[0].message.content
+                if not content or not content.strip():
+                    raise ValueError("API 返回空内容")
+
+                # 解析批量响应
+                parsed = parse_batch_response(content, batch_names)
+
+                if parsed:
+                    for name, summary in parsed.items():
+                        trends[name]["summary"] = summary
+                        print(f"    ✅ {name}")
+
+                    # 未解析出的分类加入失败队列
+                    for name in batch_names:
+                        if name not in parsed:
+                            print(f"    ⚠️  未解析到: {name}（将单独重试）")
+                            failed_cats.append(
+                                next(b for b in batch if b[0] == name)
+                            )
+
+                    # 增量保存
+                    _save_trends_incremental(
+                        trend_path, trend_date, prev_date, trends
+                    )
+                    batch_success = True
+                    break
+                else:
+                    raise ValueError("批量响应解析失败，未匹配到任何分类")
+
+            except Exception as e:
+                print(f"    ⚠️  第 {attempt} 次失败: {e}")
+                if attempt < max_retries:
+                    import time
+                    time.sleep(5 * attempt)
+
+        if not batch_success:
+            print(f"    ❌ 批量生成失败（已重试 {max_retries} 次），"
+                  f"将逐个重试")
+            failed_cats.extend(batch)
+
+    # 3. 对失败的分类逐个重试（降级为单分类 prompt）
+    if failed_cats:
+        print(f"\n  🔄 逐个重试 {len(failed_cats)} 个失败分类...")
+        for cat_name, cat, trend in failed_cats:
+            prompt = build_ai_prompt(cat_name, cat, trend)
+            max_retries = 3
+            success = False
+            for attempt in range(1, max_retries + 1):
+                try:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=500,
+                        temperature=0.7,
+                    )
+                    content = response.choices[0].message.content
+                    if not content or not content.strip():
+                        raise ValueError("API 返回空内容")
+                    trends[cat_name]["summary"] = content.strip()
+                    print(f"    ✅ {cat_name}")
+                    _save_trends_incremental(
+                        trend_path, trend_date, prev_date, trends
+                    )
+                    success = True
+                    break
+                except Exception as e:
+                    print(f"    ⚠️  {cat_name} 第 {attempt} 次失败: {e}")
+                    if attempt < max_retries:
+                        import time
+                        time.sleep(5 * attempt)
+
+            if not success:
+                print(f"    ❌ {cat_name} 最终失败")
+                old = existing_trends.get(cat_name, {}).get("summary", "")
+                if old and not is_rule_summary(old):
+                    trends[cat_name]["summary"] = old
+                    print(f"    ↩️  保留旧 AI 总结: {cat_name}")
+                else:
+                    trends[cat_name]["summary"] = generate_trend_summary_text(
+                        cat_name, trend
+                    )
+
+    return trends
+
+
+def main():
+    parser = argparse.ArgumentParser(description="构建 latest_ranks.json")
+    parser.add_argument("--force", action="store_true",
+                        help="强制重新生成所有 AI 总结，忽略已有总结")
+    parser.add_argument("--date", type=str, default="",
+                        help="指定目标日期 (YYYY-MM-DD)，默认使用最新快照")
+    args = parser.parse_args()
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(base_dir, "data")
+    trends_dir = os.path.join(data_dir, "trends")
+    os.makedirs(trends_dir, exist_ok=True)
+
+    # 查找 JSON 快照文件
+    snapshots = sorted(
+        glob.glob(os.path.join(data_dir, "fanqie_male_new_ranks_*.json"))
+    )
+
+    if not snapshots:
+        print("未找到任何 JSON 快照文件。请先运行迁移脚本或爬虫。")
+        sys.exit(1)
+
+    # 根据 --date 参数选择目标快照
+    if args.date:
+        target_date_compact = args.date.replace("-", "")
+        target_path = os.path.join(
+            data_dir, f"fanqie_male_new_ranks_{target_date_compact}.json"
+        )
+        if not os.path.exists(target_path):
+            print(f"❌ 未找到 {args.date} 的快照文件: {target_path}")
+            sys.exit(1)
+        latest_path = target_path
+        # 找到该快照在列表中的位置，取前一个作为对比
+        target_idx = snapshots.index(target_path) if target_path in snapshots else -1
+    else:
+        latest_path = snapshots[-1]
+        target_idx = len(snapshots) - 1
+
+    latest_data = load_snapshot(latest_path)
+    print(f"目标快照: {os.path.basename(latest_path)} ({latest_data['date']})")
+
+    # 加载前一天的快照（如果有）
+    prev_data = None
+    prev_date = ""
+    if target_idx > 0:
+        prev_path = snapshots[target_idx - 1]
+        prev_data = load_snapshot(prev_path)
+        prev_date = prev_data.get("date", "")
+        print(f"对比快照: {os.path.basename(prev_path)} ({prev_date})")
+
+    # 加载已有的趋势数据（用于保留已有 AI 总结）
+    existing_trends = {}
+    trend_path = os.path.join(trends_dir, f"{latest_data['date']}.json")
+    if os.path.exists(trend_path) and not args.force:
+        try:
+            with open(trend_path, "r", encoding="utf-8") as f:
+                existing_trend_data = json.load(f)
+                existing_trends = existing_trend_data.get("trends", {})
+            ai_count = sum(1 for t in existing_trends.values()
+                          if not is_rule_summary(t.get("summary", "")))
+            rule_count = len(existing_trends) - ai_count
+            print(f"已有趋势数据: {ai_count} 个 AI 总结, {rule_count} 个待补充")
+        except Exception:
+            pass
+
+    if args.force:
+        print("\n🔄 强制模式：将重新生成所有 AI 总结")
+
+    # 对比趋势
+    if prev_data:
+        trends = compare_categories(
+            latest_data["categories"], prev_data["categories"]
+        )
+    else:
+        print("仅有一天数据，无法生成趋势对比。")
+        trends = {
+            cat["name"]: {
+                "new_count": 0,
+                "dropped_count": 0,
+                "new_books": [],
+                "dropped_books": [],
+                "top_risers": [],
+                "top_fallers": [],
+                "reads_growth": [],
+                "summary": "首日数据，暂无趋势对比。",
+            }
+            for cat in latest_data["categories"]
+        }
+
+    # ========== AI 总结：通过 API_BASE_URL / API_KEY / API_MODEL 配置 ==========
+    api_base_url = os.environ.get("API_BASE_URL", "")
+    api_key = os.environ.get("API_KEY", "")
+    api_model = os.environ.get("API_MODEL", "")
+
+    if api_base_url and api_key and api_model:
+        print(f"\n正在使用 {api_model} 生成 AI 总结...")
+        print(f"  API: {api_base_url}")
+        trends = generate_ai_summaries(
+            latest_data["categories"], trends,
+            api_key, api_base_url, api_model,
+            force=args.force,
+            existing_trends=existing_trends,
+            trend_path=trend_path,
+            trend_date=latest_data["date"],
+            prev_date=prev_date
+        )
+    else:
+        missing = [k for k, v in {"API_BASE_URL": api_base_url, "API_KEY": api_key, "API_MODEL": api_model}.items() if not v]
+        print(f"\n未配置 AI 服务（缺少: {', '.join(missing)}），使用规则摘要替代。")
+        for cat_name, trend in trends.items():
+            # 保留已有 AI 总结
+            old = existing_trends.get(cat_name, {}).get("summary", "")
+            if old and not is_rule_summary(old):
+                trend["summary"] = old
+            elif not trend.get("summary"):
+                trend["summary"] = generate_trend_summary_text(cat_name, trend)
+
+    # 组装输出
+    output = {
+        "date": latest_data["date"],
+        "prev_date": prev_date,
+        "categories": [],
+    }
+
+    for cat in latest_data["categories"]:
+        cat_name = cat["name"]
+        cat_output = {
+            "name": cat_name,
+            "trend": trends.get(cat_name, {}),
+            "books": cat.get("books", []),
+        }
+        output["categories"].append(cat_output)
+
+    # 写入 latest_ranks.json
+    out_path = os.path.join(data_dir, "latest_ranks.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+    print(f"\n✅ 已生成: {out_path}")
+
+    # 写入 trends/YYYY-MM-DD.json
+    trend_output = {
+        "date": latest_data["date"],
+        "prev_date": prev_date,
+        "trends": trends,
+    }
+    with open(trend_path, "w", encoding="utf-8") as f:
+        json.dump(trend_output, f, ensure_ascii=False, indent=2)
+    print(f"✅ 趋势存档: {trend_path}")
+
+    # 生成 dates.json 索引（供前端历史日期选择器使用）
+    date_list = []
+    for s in snapshots:
+        fname = os.path.basename(s)
+        # fanqie_male_new_ranks_YYYYMMDD.json -> YYYY-MM-DD
+        m = re.search(r"(\d{4})(\d{2})(\d{2})", fname)
+        if m:
+            date_list.append(f"{m.group(1)}-{m.group(2)}-{m.group(3)}")
+    dates_path = os.path.join(data_dir, "dates.json")
+    with open(dates_path, "w", encoding="utf-8") as f:
+        json.dump({"dates": sorted(date_list)}, f, ensure_ascii=False, indent=2)
+    print(f"✅ 日期索引: {dates_path} ({len(date_list)} 个日期)")
+
+
+if __name__ == "__main__":
+    main()
